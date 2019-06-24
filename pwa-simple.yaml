@@ -1,0 +1,80 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: PWA Website
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: The target, such as www.mywebsite.co.uk. You should have already created an SSL Certificate for this.
+
+  CertificateArn:
+    Type: String
+    Description: The Certificate you've created for the DomainName
+
+Resources:
+  WebResourceBucket:
+    Type: "AWS::S3::Bucket"
+
+  OriginAccessIdentity:
+    Type: "AWS::CloudFront::CloudFrontOriginAccessIdentity"
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub "OAI created by ${AWS::StackName} in ${AWS::Region}"
+
+  S3Policy:
+    Type: "AWS::S3::BucketPolicy"
+    DependsOn: OriginAccessIdentity
+    Properties:
+      Bucket: !Ref WebResourceBucket
+      PolicyDocument:
+        Statement:
+          - Action:
+              - "s3:GetObject"
+            Effect: "Allow"
+            Resource: !Sub "arn:aws:s3:::${WebResourceBucket}/*"
+            Principal:
+                AWS: !Sub "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${OriginAccessIdentity}"
+
+  CloudFrontDistribution:
+      Type: "AWS::CloudFront::Distribution"
+      DependsOn:
+        - S3Policy
+      Properties:
+        DistributionConfig:
+          Aliases:
+            - !Ref DomainName
+          DefaultCacheBehavior:
+            Compress: true
+            AllowedMethods:
+              - "DELETE"
+              - "GET"
+              - "HEAD"
+              - "OPTIONS"
+              - "PATCH"
+              - "POST"
+              - "PUT"
+            TargetOriginId: !Sub "Root-S3-${WebResourceBucket}"
+            ViewerProtocolPolicy: redirect-to-https
+            ForwardedValues:
+              QueryString: true
+              Cookies:
+                Forward: all
+          DefaultRootObject: index.html
+          Enabled: true
+          Origins:
+             - Id:  !Sub "Root-S3-${WebResourceBucket}"
+               DomainName: !Sub "${WebResourceBucket}.s3.amazonaws.com"
+               S3OriginConfig:
+                OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${OriginAccessIdentity}"
+          PriceClass: PriceClass_All
+          ViewerCertificate:
+            AcmCertificateArn: !Ref CertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.1_2016
+
+
+Outputs:
+  CloudFrontDomain:
+    Description: Value to be ALIASED for the Domain in the Route53 Config
+    Value: !GetAtt CloudFrontDistribution.DomainName
